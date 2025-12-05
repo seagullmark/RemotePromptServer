@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Let's Encrypt Certificate Setup - RemotePrompt</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1 { color: #1a1a1a; border-bottom: 2px solid #007AFF; padding-bottom: 10px; }
+        h2 { color: #333; margin-top: 40px; border-left: 4px solid #007AFF; padding-left: 10px; }
+        h3 { color: #555; margin-top: 25px; }
+        .lang-switch { text-align: right; margin-bottom: 20px; }
+        .lang-switch a { color: #007AFF; text-decoration: none; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Monaco, monospace; }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        pre code { background: none; color: inherit; padding: 0; }
+        .note { background: #e7f3ff; border-left: 4px solid #007AFF; padding: 10px 15px; margin: 15px 0; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 15px 0; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; padding: 10px 15px; margin: 15px 0; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #f8f8f8; }
+        .step { display: flex; margin: 15px 0; align-items: flex-start; }
+        .step-num { background: #007AFF; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 15px; flex-shrink: 0; }
+        .step-content { flex: 1; }
+        .toc { background: #f8f8f8; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
+        .toc ul { margin: 0; padding-left: 20px; }
+        .toc li { margin: 5px 0; }
+        .toc a { color: #007AFF; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="lang-switch">
+        <a href="ja.html">日本語</a>
+    </div>
+
+    <h1>Let's Encrypt Certificate Setup Guide</h1>
+
+    <div class="toc">
+        <strong>Table of Contents</strong>
+        <ul>
+            <li><a href="#overview">1. Overview</a></li>
+            <li><a href="#prerequisites">2. Prerequisites</a></li>
+            <li><a href="#cloudflare-setup">3. Cloudflare Setup</a></li>
+            <li><a href="#certificate-setup">4. Certificate Setup</a></li>
+            <li><a href="#server-config">5. Server Configuration</a></li>
+            <li><a href="#renewal">6. Auto-Renewal</a></li>
+            <li><a href="#troubleshooting">7. Troubleshooting</a></li>
+        </ul>
+    </div>
+
+    <h2 id="overview">1. Overview</h2>
+
+    <p>This guide explains how to set up a Let's Encrypt SSL certificate for your RemotePrompt server.</p>
+
+    <h3>Self-Signed vs Commercial Certificate</h3>
+    <table>
+        <tr>
+            <th>Feature</th>
+            <th>Self-Signed</th>
+            <th>Let's Encrypt (Commercial)</th>
+        </tr>
+        <tr>
+            <td>First Connection</td>
+            <td>Requires fingerprint verification</td>
+            <td>Automatically trusted</td>
+        </tr>
+        <tr>
+            <td>Domain</td>
+            <td>Not required (IP address OK)</td>
+            <td>Required</td>
+        </tr>
+        <tr>
+            <td>Renewal</td>
+            <td>Manual (10 year validity)</td>
+            <td>Auto-renewal (every 90 days)</td>
+        </tr>
+        <tr>
+            <td>Recommended For</td>
+            <td>Local network</td>
+            <td>Internet-facing servers</td>
+        </tr>
+    </table>
+
+    <div class="note">
+        <strong>Which should you choose?</strong><br>
+        If you only use the server on your local network, self-signed certificates are sufficient.
+        For VPN or internet access, Let's Encrypt is recommended.
+    </div>
+
+    <h2 id="prerequisites">2. Prerequisites</h2>
+
+    <h3>Requirements</h3>
+    <ul>
+        <li><strong>Domain name</strong>: A domain you control (e.g., <code>remoteprompt.example.com</code>)</li>
+        <li><strong>Cloudflare account</strong>: Free plan is sufficient</li>
+        <li><strong>Python 3.11+</strong>: Required for certbot-dns-cloudflare</li>
+    </ul>
+
+    <h3>Why Cloudflare?</h3>
+    <p>Let's Encrypt verifies domain ownership before issuing certificates. Verification methods include:</p>
+    <table>
+        <tr>
+            <th>Method</th>
+            <th>Description</th>
+            <th>Suitability for RemotePrompt</th>
+        </tr>
+        <tr>
+            <td>HTTP-01</td>
+            <td>Serve file on port 80</td>
+            <td>❌ Not suitable (we use port 8443)</td>
+        </tr>
+        <tr>
+            <td>DNS-01</td>
+            <td>Authenticate via DNS record</td>
+            <td>✅ Recommended</td>
+        </tr>
+        <tr>
+            <td>TLS-ALPN-01</td>
+            <td>Authenticate on port 443</td>
+            <td>❌ Not suitable (we use port 8443)</td>
+        </tr>
+    </table>
+    <p>Cloudflare automates DNS-01 authentication and is free to use.</p>
+
+    <h2 id="cloudflare-setup">3. Cloudflare Setup</h2>
+
+    <h3>Step 1: Add Domain to Cloudflare</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            Create an account at <a href="https://dash.cloudflare.com/sign-up" target="_blank">Cloudflare</a> (free)
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            Click "Add a Site" and add your domain
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            Select the Free plan
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            Update your domain's nameservers to Cloudflare at your registrar
+        </div>
+    </div>
+
+    <h3>Step 2: Configure DNS Records</h3>
+    <p>Set up a subdomain for your RemotePrompt server.</p>
+
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            In Cloudflare dashboard, go to "DNS" → "Records"
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            Click "Add record" and configure:
+            <table>
+                <tr><th>Field</th><th>Value</th></tr>
+                <tr><td>Type</td><td>A</td></tr>
+                <tr><td>Name</td><td>remoteprompt (or any subdomain)</td></tr>
+                <tr><td>IPv4 address</td><td>Your server's public IP</td></tr>
+                <tr><td>Proxy status</td><td><strong>DNS only</strong> (orange cloud OFF)</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="warning">
+        <strong>Important: Disable Proxy</strong><br>
+        Turn OFF Cloudflare's proxy (orange cloud). RemotePrompt uses port 8443,
+        which doesn't work with Cloudflare's proxy.
+    </div>
+
+    <h3>Step 3: Create API Token</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">API Tokens</a>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            Click "Create Token" → Select "Edit zone DNS" template
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            Under Zone Resources, select your domain
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            Click "Continue to summary" → "Create Token"
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+            Save the displayed token securely (shown only once)
+        </div>
+    </div>
+
+    <h2 id="certificate-setup">4. Certificate Setup</h2>
+
+    <h3>Automatic Setup Script</h3>
+    <pre><code># Run the setup script
+./scripts/setup_letsencrypt.sh remoteprompt.example.com your-email@example.com</code></pre>
+
+    <p>The script automatically:</p>
+    <ul>
+        <li>Installs certbot</li>
+        <li>Installs Cloudflare plugin</li>
+        <li>Configures API token</li>
+        <li>Obtains certificate</li>
+        <li>Updates .env file</li>
+    </ul>
+
+    <h3>Manual Setup</h3>
+    <p>If the automatic script doesn't work, follow these manual steps:</p>
+
+    <pre><code># 1. Install certbot
+brew install certbot  # macOS
+# or
+sudo apt install certbot  # Ubuntu/Debian
+
+# 2. Install Cloudflare plugin
+pip3 install certbot-dns-cloudflare
+
+# 3. Create credentials file
+mkdir -p secrets
+cat > secrets/cloudflare.ini << EOF
+dns_cloudflare_api_token = YOUR_API_TOKEN_HERE
+EOF
+chmod 600 secrets/cloudflare.ini
+
+# 4. Obtain certificate
+certbot certonly \
+    --dns-cloudflare \
+    --dns-cloudflare-credentials secrets/cloudflare.ini \
+    --config-dir ./certs/config \
+    --work-dir ./certs/work \
+    --logs-dir ./logs/certbot \
+    -d remoteprompt.example.com</code></pre>
+
+    <h2 id="server-config">5. Server Configuration</h2>
+
+    <p>Edit your <code>.env</code> file to use the commercial certificate:</p>
+
+    <pre><code># Change SSL mode to commercial
+SSL_MODE=commercial
+
+# Certificate paths
+COMMERCIAL_CERT_PATH=./certs/commercial/fullchain.pem
+COMMERCIAL_KEY_PATH=./certs/commercial/privkey.pem
+
+# Set hostname
+SERVER_HOSTNAME=remoteprompt.example.com</code></pre>
+
+    <p>Restart the server to apply settings:</p>
+    <pre><code>python main.py</code></pre>
+
+    <div class="success">
+        <strong>Verification</strong><br>
+        If you see <code>[SSL] Mode: commercial</code> in the startup log, the setup is successful.
+    </div>
+
+    <h2 id="renewal">6. Auto-Renewal</h2>
+
+    <p>Let's Encrypt certificates expire after 90 days. Set up automatic renewal.</p>
+
+    <h3>Configure Cron Job</h3>
+    <pre><code># Edit crontab
+crontab -e
+
+# Add the following (check twice daily - recommended by Let's Encrypt)
+0 0,12 * * * /path/to/RemotePromptServer/scripts/renew_certificate.sh >> /path/to/RemotePromptServer/logs/renewal.log 2>&1</code></pre>
+
+    <h3>Test Renewal</h3>
+    <pre><code># Dry run to test renewal
+certbot renew --dry-run --config-dir ./certs/config</code></pre>
+
+    <h2 id="troubleshooting">7. Troubleshooting</h2>
+
+    <table>
+        <tr>
+            <th>Error</th>
+            <th>Cause</th>
+            <th>Solution</th>
+        </tr>
+        <tr>
+            <td>DNS problem</td>
+            <td>DNS records incorrect</td>
+            <td>
+                <ul>
+                    <li>Verify A record in Cloudflare</li>
+                    <li>Ensure proxy is OFF</li>
+                    <li>Wait for DNS propagation (up to 48 hours)</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>Unauthorized</td>
+            <td>Insufficient API token permissions</td>
+            <td>Verify Zone:DNS:Edit and Zone:Zone:Read permissions</td>
+        </tr>
+        <tr>
+            <td>Certificate not found</td>
+            <td>Wrong path</td>
+            <td>Check with <code>ls -la certs/config/live/</code></td>
+        </tr>
+    </table>
+
+    <h3>Check Logs</h3>
+    <pre><code># certbot logs
+cat logs/certbot/letsencrypt.log
+
+# Renewal logs
+cat logs/renewal.log</code></pre>
+
+</body>
+</html>

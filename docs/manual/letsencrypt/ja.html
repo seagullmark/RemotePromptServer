@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Let's Encrypt 証明書設定 - RemotePrompt</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1 { color: #1a1a1a; border-bottom: 2px solid #007AFF; padding-bottom: 10px; }
+        h2 { color: #333; margin-top: 40px; border-left: 4px solid #007AFF; padding-left: 10px; }
+        h3 { color: #555; margin-top: 25px; }
+        .lang-switch { text-align: right; margin-bottom: 20px; }
+        .lang-switch a { color: #007AFF; text-decoration: none; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Monaco, monospace; }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        pre code { background: none; color: inherit; padding: 0; }
+        .note { background: #e7f3ff; border-left: 4px solid #007AFF; padding: 10px 15px; margin: 15px 0; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 15px 0; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; padding: 10px 15px; margin: 15px 0; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #f8f8f8; }
+        .step { display: flex; margin: 15px 0; align-items: flex-start; }
+        .step-num { background: #007AFF; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 15px; flex-shrink: 0; }
+        .step-content { flex: 1; }
+        .toc { background: #f8f8f8; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
+        .toc ul { margin: 0; padding-left: 20px; }
+        .toc li { margin: 5px 0; }
+        .toc a { color: #007AFF; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="lang-switch">
+        <a href="en.html">English</a>
+    </div>
+
+    <h1>Let's Encrypt 証明書設定ガイド</h1>
+
+    <div class="toc">
+        <strong>目次</strong>
+        <ul>
+            <li><a href="#overview">1. 概要</a></li>
+            <li><a href="#prerequisites">2. 前提条件</a></li>
+            <li><a href="#cloudflare-setup">3. Cloudflare の設定</a></li>
+            <li><a href="#certificate-setup">4. 証明書の取得</a></li>
+            <li><a href="#server-config">5. サーバー設定</a></li>
+            <li><a href="#renewal">6. 自動更新</a></li>
+            <li><a href="#troubleshooting">7. トラブルシューティング</a></li>
+        </ul>
+    </div>
+
+    <h2 id="overview">1. 概要</h2>
+
+    <p>このガイドでは、Let's Encrypt を使用して RemotePrompt サーバーに正式なSSL証明書を設定する方法を説明します。</p>
+
+    <h3>自己署名証明書 vs 商用証明書</h3>
+    <table>
+        <tr>
+            <th>項目</th>
+            <th>自己署名証明書</th>
+            <th>Let's Encrypt（商用）</th>
+        </tr>
+        <tr>
+            <td>初回接続</td>
+            <td>フィンガープリント確認が必要</td>
+            <td>自動的に信頼される</td>
+        </tr>
+        <tr>
+            <td>ドメイン</td>
+            <td>不要（IPアドレスで可）</td>
+            <td>必要</td>
+        </tr>
+        <tr>
+            <td>更新</td>
+            <td>手動（10年有効）</td>
+            <td>自動更新（90日ごと）</td>
+        </tr>
+        <tr>
+            <td>推奨用途</td>
+            <td>ローカルネットワーク</td>
+            <td>インターネット公開</td>
+        </tr>
+    </table>
+
+    <div class="note">
+        <strong>どちらを選ぶべき？</strong><br>
+        ローカルネットワーク内でのみ使用する場合は、自己署名証明書で十分です。
+        VPN経由やインターネット経由でアクセスする場合は、Let's Encrypt を推奨します。
+    </div>
+
+    <h2 id="prerequisites">2. 前提条件</h2>
+
+    <h3>必要なもの</h3>
+    <ul>
+        <li><strong>ドメイン名</strong>: あなたが管理するドメイン（例: <code>remoteprompt.example.com</code>）</li>
+        <li><strong>Cloudflare アカウント</strong>: 無料プランで可</li>
+        <li><strong>Python 3.11+</strong>: certbot-dns-cloudflare のインストールに必要</li>
+    </ul>
+
+    <h3>なぜ Cloudflare を使うのか？</h3>
+    <p>Let's Encrypt は証明書発行前にドメインの所有権を確認します。確認方法には以下があります：</p>
+    <table>
+        <tr>
+            <th>方式</th>
+            <th>説明</th>
+            <th>RemotePrompt での適合性</th>
+        </tr>
+        <tr>
+            <td>HTTP-01</td>
+            <td>ポート80でファイルを公開</td>
+            <td>❌ ポート8443を使用するため不適</td>
+        </tr>
+        <tr>
+            <td>DNS-01</td>
+            <td>DNSレコードで認証</td>
+            <td>✅ 推奨</td>
+        </tr>
+        <tr>
+            <td>TLS-ALPN-01</td>
+            <td>ポート443で認証</td>
+            <td>❌ ポート8443を使用するため不適</td>
+        </tr>
+    </table>
+    <p>Cloudflare はDNS-01認証を自動化でき、無料で利用できます。</p>
+
+    <h2 id="cloudflare-setup">3. Cloudflare の設定</h2>
+
+    <h3>Step 1: Cloudflare にドメインを追加</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <a href="https://dash.cloudflare.com/sign-up" target="_blank">Cloudflare</a> でアカウントを作成（無料）
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            「Add a Site」からドメインを追加
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            Free プランを選択
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            ドメインレジストラでネームサーバーを Cloudflare に変更
+        </div>
+    </div>
+
+    <h3>Step 2: DNS レコードの設定</h3>
+    <p>RemotePrompt サーバー用のサブドメインを設定します。</p>
+
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            Cloudflare ダッシュボードで「DNS」→「Records」を開く
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            「Add record」をクリックして以下を設定：
+            <table>
+                <tr><th>項目</th><th>値</th></tr>
+                <tr><td>Type</td><td>A</td></tr>
+                <tr><td>Name</td><td>remoteprompt（任意のサブドメイン）</td></tr>
+                <tr><td>IPv4 address</td><td>サーバーのグローバルIP</td></tr>
+                <tr><td>Proxy status</td><td><strong>DNS only</strong>（オレンジの雲をオフ）</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="warning">
+        <strong>重要: プロキシをオフに</strong><br>
+        Cloudflare のプロキシ（オレンジの雲）はオフにしてください。
+        RemotePrompt はポート8443を使用するため、プロキシを有効にすると接続できません。
+    </div>
+
+    <h3>Step 3: API トークンの作成</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">API Tokens</a> ページを開く
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            「Create Token」→「Edit zone DNS」テンプレートを選択
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            Zone Resources で対象ドメインを選択
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            「Continue to summary」→「Create Token」
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+            表示されたトークンを安全な場所に保存（一度しか表示されません）
+        </div>
+    </div>
+
+    <h2 id="certificate-setup">4. 証明書の取得</h2>
+
+    <h3>自動セットアップスクリプト</h3>
+    <pre><code># スクリプトを実行
+./scripts/setup_letsencrypt.sh remoteprompt.example.com your-email@example.com</code></pre>
+
+    <p>スクリプトは以下を自動的に行います：</p>
+    <ul>
+        <li>certbot のインストール</li>
+        <li>Cloudflare プラグインのインストール</li>
+        <li>API トークンの設定</li>
+        <li>証明書の取得</li>
+        <li>.env ファイルの更新</li>
+    </ul>
+
+    <h3>手動セットアップ</h3>
+    <p>自動スクリプトが動作しない場合は、以下の手順で手動設定できます。</p>
+
+    <pre><code># 1. certbot をインストール
+brew install certbot  # macOS
+# または
+sudo apt install certbot  # Ubuntu/Debian
+
+# 2. Cloudflare プラグインをインストール
+pip3 install certbot-dns-cloudflare
+
+# 3. 認証情報ファイルを作成
+mkdir -p secrets
+cat > secrets/cloudflare.ini << EOF
+dns_cloudflare_api_token = YOUR_API_TOKEN_HERE
+EOF
+chmod 600 secrets/cloudflare.ini
+
+# 4. 証明書を取得
+certbot certonly \
+    --dns-cloudflare \
+    --dns-cloudflare-credentials secrets/cloudflare.ini \
+    --config-dir ./certs/config \
+    --work-dir ./certs/work \
+    --logs-dir ./logs/certbot \
+    -d remoteprompt.example.com</code></pre>
+
+    <h2 id="server-config">5. サーバー設定</h2>
+
+    <p><code>.env</code> ファイルを編集して商用証明書を使用するよう設定します。</p>
+
+    <pre><code># SSL モードを commercial に変更
+SSL_MODE=commercial
+
+# 証明書のパス
+COMMERCIAL_CERT_PATH=./certs/commercial/fullchain.pem
+COMMERCIAL_KEY_PATH=./certs/commercial/privkey.pem
+
+# ホスト名を設定
+SERVER_HOSTNAME=remoteprompt.example.com</code></pre>
+
+    <p>サーバーを再起動して設定を反映：</p>
+    <pre><code>python main.py</code></pre>
+
+    <div class="success">
+        <strong>確認</strong><br>
+        起動ログに <code>[SSL] Mode: commercial</code> と表示されれば成功です。
+    </div>
+
+    <h2 id="renewal">6. 自動更新</h2>
+
+    <p>Let's Encrypt の証明書は90日で期限切れになります。自動更新を設定しましょう。</p>
+
+    <h3>cron ジョブの設定</h3>
+    <pre><code># crontab を編集
+crontab -e
+
+# 以下を追加（1日2回更新チェック - Let's Encrypt 推奨）
+0 0,12 * * * /path/to/RemotePromptServer/scripts/renew_certificate.sh >> /path/to/RemotePromptServer/logs/renewal.log 2>&1</code></pre>
+
+    <h3>更新テスト</h3>
+    <pre><code># ドライランで更新テスト
+certbot renew --dry-run --config-dir ./certs/config</code></pre>
+
+    <h2 id="troubleshooting">7. トラブルシューティング</h2>
+
+    <table>
+        <tr>
+            <th>エラー</th>
+            <th>原因</th>
+            <th>解決策</th>
+        </tr>
+        <tr>
+            <td>DNS problem</td>
+            <td>DNSレコードが正しくない</td>
+            <td>
+                <ul>
+                    <li>Cloudflare でAレコードを確認</li>
+                    <li>プロキシがオフになっているか確認</li>
+                    <li>DNS伝播を待つ（最大48時間）</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>Unauthorized</td>
+            <td>APIトークンの権限不足</td>
+            <td>Zone:DNS:Edit と Zone:Zone:Read の権限があるか確認</td>
+        </tr>
+        <tr>
+            <td>Certificate not found</td>
+            <td>パスが間違っている</td>
+            <td><code>ls -la certs/config/live/</code> で確認</td>
+        </tr>
+    </table>
+
+    <h3>ログの確認</h3>
+    <pre><code># certbot のログ
+cat logs/certbot/letsencrypt.log
+
+# 更新ログ
+cat logs/renewal.log</code></pre>
+
+</body>
+</html>
