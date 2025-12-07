@@ -5,6 +5,7 @@ import asyncio
 import uuid
 import json
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import (
@@ -324,6 +325,8 @@ def create_room(
     try:
         validated_path = validate_workspace_path(req.workspace_path)
     except ValueError as exc:
+        LOGGER.warning("[ROOM] Failed to create room: %s (device_id=%s, workspace_path=%s)", 
+                      str(exc), req.device_id, req.workspace_path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 新しいRoomは最後に追加（既存の最大sort_order + 1）
@@ -1283,4 +1286,33 @@ async def global_events_stream(request: Request) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    from config import settings
+    
+    cert_path, key_path, mode_used = get_ssl_paths()
+    
+    # 証明書ファイルが存在しない場合は作成
+    if not Path(cert_path).exists() or not Path(key_path).exists():
+        if mode_used == "self_signed" and settings.ssl_auto_generate:
+            LOGGER.info("[SSL] Certificate files not found, generating...")
+            cert_path, key_path, fingerprint = ensure_certificate_exists(
+                hostname=settings.server_hostname,
+                san_ips=settings.get_san_ips_list(),
+            )
+            LOGGER.info("[SSL] Certificate generated: %s", cert_path)
+        else:
+            LOGGER.error("[SSL] Certificate files not found: %s, %s", cert_path, key_path)
+            raise FileNotFoundError(f"SSL certificate files not found: {cert_path}, {key_path}")
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=settings.server_port,
+        ssl_keyfile=key_path,
+        ssl_certfile=cert_path,
+        log_level=settings.log_level.lower(),
     )
