@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+import json
+from typing import List, Literal, Optional, Tuple, Union
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +15,7 @@ class Settings(BaseSettings):
     api_key: str = "dev-api-key"
     database_url: str = "sqlite:///./data/jobs.db"
     log_level: str = "INFO"
-    allowed_origins: List[str] = [
-        "http://127.0.0.1:8443",
-    ]
+    allowed_origins: Union[str, List[str]] = "http://127.0.0.1:8443"  # 文字列またはリストとして定義
     threads_compat_mode: bool = True  # thread_id省略を許可する互換モード（Phase A/Bで使用）
 
     # APNs Push Notification Configuration
@@ -53,14 +52,40 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_parse_none_str="",
+        # 環境変数名のマッピング
+        env_prefix="",
     )
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
-    def split_origins(cls, value):
+    def normalize_allowed_origins(cls, value):
+        # 空文字列やNoneの場合はデフォルト値を使用
+        if value is None or value == "":
+            return "http://127.0.0.1:8443"
+        # 既にリストの場合はそのまま返す
+        if isinstance(value, list):
+            return value
+        # 文字列の場合はそのまま返す（JSONパースは試みない）
         if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+            return value
+        # その他の型の場合は文字列に変換
+        return str(value)
+
+    @model_validator(mode="after")
+    def convert_allowed_origins_to_list(self):
+        """allowed_originsをリストに変換する。"""
+        # 文字列をリストに変換して保存
+        if isinstance(self.allowed_origins, str):
+            if not self.allowed_origins.strip():
+                self.allowed_origins = ["http://127.0.0.1:8443"]
+            else:
+                self.allowed_origins = [
+                    origin.strip() 
+                    for origin in self.allowed_origins.split(",") 
+                    if origin.strip()
+                ]
+        return self
 
     @field_validator("server_san_ips", mode="before")
     @classmethod
@@ -162,6 +187,10 @@ def setup_logging() -> None:
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+
+    # logsディレクトリが存在しない場合は作成
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
 
     file_handler = RotatingFileHandler(
         "logs/server.log", maxBytes=10 * 1024 * 1024, backupCount=5

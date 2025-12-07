@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Generator
 
 from sqlalchemy import create_engine, event
@@ -48,6 +49,17 @@ def init_db() -> None:
     """Create database tables based on model metadata."""
     # Import inside function to ensure models register with the Base metadata.
     from models import Device, DeviceSession, Job, Room, Thread  # pylint: disable=import-outside-toplevel
+
+    # SQLiteデータベースファイルのディレクトリが存在しない場合は作成
+    if DATABASE_URL.startswith("sqlite:///"):
+        db_path = DATABASE_URL.replace("sqlite:///", "")
+        # 相対パスの場合
+        if db_path.startswith("./"):
+            db_path = db_path[2:]
+        db_file = Path(db_path)
+        db_dir = db_file.parent
+        if db_dir != Path(".") and not db_dir.exists():
+            db_dir.mkdir(parents=True, exist_ok=True)
 
     Base.metadata.create_all(bind=engine)
     _ensure_room_settings_column()
