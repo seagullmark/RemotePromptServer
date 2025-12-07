@@ -5,14 +5,13 @@ from typing import List
 
 
 def get_default_allowed_paths() -> List[str]:
-    """Get default allowed paths based on current user's home directory."""
+    """Get default allowed paths based on current user's home directory.
+
+    By default, allows the entire home directory for flexibility.
+    Users can restrict this via ALLOWED_BASE_PATHS environment variable.
+    """
     home = str(Path.home())
-    return [
-        os.path.join(home, "Projects"),
-        os.path.join(home, "Documents"),
-        os.path.join(home, "Desktop"),
-        os.path.join(home, "work"),
-    ]
+    return [home]
 
 
 # Allowed base paths for workspace directories
