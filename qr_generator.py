@@ -26,28 +26,32 @@ def generate_config_payload(
     api_key: str,
     fingerprint: str,
     server_name: Optional[str] = None,
+    device_id: Optional[str] = None,
 ) -> str:
     """Generate JSON payload for QR code.
+
+    Matches iOS SettingsShareData format with snake_case keys.
 
     Args:
         server_url: Full server URL (e.g., https://192.168.1.100:8443)
         api_key: API key for authentication
         fingerprint: SSL certificate fingerprint (SHA256:XX:XX:...)
         server_name: Optional display name for the server
+        device_id: Optional device ID (generated on iOS if not provided)
 
     Returns:
         JSON string containing server configuration
     """
-    payload = {
-        "type": "remoteprompt-server",
-        "version": 1,
-        "url": server_url,
-        "apiKey": api_key,
-        "fingerprint": fingerprint,
-    }
+    import uuid
 
-    if server_name:
-        payload["name"] = server_name
+    payload = {
+        "server_url": server_url,
+        "api_key": api_key,
+        "device_id": device_id or str(uuid.uuid4()),
+        "alternative_urls": [],
+        "auto_fallback": True,
+        "certificate_fingerprint": fingerprint,
+    }
 
     return json.dumps(payload, separators=(",", ":"))
 
