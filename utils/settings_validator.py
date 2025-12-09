@@ -31,12 +31,17 @@ ALLOWED_VALUES: Dict[str, Dict[str, List[str]]] = {
         "approval_policy": ["untrusted", "on-failure", "on-request", "never"],
         "reasoning_effort": ["low", "medium", "high", "extra-high"],
     },
+    "gemini": {
+        "model": ["gemini-3.0-pro", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+        "approval_mode": ["default", "auto_edit", "yolo"],
+    },
 }
 
 # Reserved options that must not be passed via custom_flags
 RESERVED_FLAGS: Dict[str, List[str]] = {
     "claude": ["--model", "--permission-mode", "--tools"],
     "codex": ["-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval", "-r", "--reasoning-effort"],
+    "gemini": ["-m", "--model", "-s", "--sandbox", "-y", "--yolo", "--approval-mode"],
 }
 
 DANGEROUS_FLAGS = [
@@ -122,6 +127,65 @@ def _validate_section(section: Dict[str, Any], ai_type: str) -> Dict[str, Any]:
         validate_custom_flags(flags, ai_type)
         result["custom_flags"] = flags
 
+    # v4.6: allowed_tools / disallowed_tools (claude only, free-form patterns)
+    if ai_type == "claude":
+        for key in ("allowed_tools", "disallowed_tools"):
+            if key in section:
+                value = section[key]
+                if not isinstance(value, list):
+                    raise ValidationError(f"{key} must be a list")
+                # Validate each pattern is a non-empty string, max 100 chars
+                for pattern in value:
+                    if not isinstance(pattern, str) or not pattern:
+                        raise ValidationError(f"Invalid pattern in {key}: must be non-empty string")
+                    if len(pattern) > 100:
+                        raise ValidationError(f"Pattern too long in {key}: {pattern[:20]}...")
+                result[key] = value
+
+    return result
+
+
+def _validate_gemini_section(section: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate gemini-specific settings."""
+    allowed = ALLOWED_VALUES["gemini"]
+    result: Dict[str, Any] = {}
+
+    # model
+    if "model" in section:
+        model = section["model"]
+        if model not in allowed["model"]:
+            raise ValidationError(f"Invalid model for gemini: {model}")
+        result["model"] = model
+
+    # approval_mode
+    if "approval_mode" in section:
+        value = section["approval_mode"]
+        if value not in allowed["approval_mode"]:
+            raise ValidationError(f"Invalid approval_mode for gemini: {value}")
+        result["approval_mode"] = value
+
+    # sandbox (boolean)
+    if "sandbox" in section:
+        value = section["sandbox"]
+        if not isinstance(value, bool):
+            raise ValidationError("gemini sandbox must be a boolean")
+        result["sandbox"] = value
+
+    # yolo (boolean)
+    if "yolo" in section:
+        value = section["yolo"]
+        if not isinstance(value, bool):
+            raise ValidationError("gemini yolo must be a boolean")
+        result["yolo"] = value
+
+    # custom_flags
+    if "custom_flags" in section:
+        flags = section["custom_flags"]
+        if not isinstance(flags, list):
+            raise ValidationError("custom_flags must be a list")
+        validate_custom_flags(flags, "gemini")
+        result["custom_flags"] = flags
+
     return result
 
 
@@ -148,6 +212,11 @@ def validate_settings(settings: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         if not isinstance(settings["codex"], dict):
             raise ValidationError("codex settings must be an object")
         sanitized["codex"] = _validate_section(settings["codex"], "codex")
+
+    if "gemini" in settings:
+        if not isinstance(settings["gemini"], dict):
+            raise ValidationError("gemini settings must be an object")
+        sanitized["gemini"] = _validate_gemini_section(settings["gemini"])
 
     # ignore unknown top-level keys (whitelist policy)
     return sanitized

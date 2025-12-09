@@ -16,6 +16,13 @@ def build_claude_command(settings: Optional[Dict] = None) -> List[str]:
         if "tools" in cfg:
             tools = ",".join(cfg["tools"])
             cmd.extend(["--tools", tools])
+        # v4.6: allowedTools/disallowedTools support
+        if "allowed_tools" in cfg and cfg["allowed_tools"]:
+            tools = ",".join(cfg["allowed_tools"])
+            cmd.extend(["--allowedTools", tools])
+        if "disallowed_tools" in cfg and cfg["disallowed_tools"]:
+            tools = ",".join(cfg["disallowed_tools"])
+            cmd.extend(["--disallowedTools", tools])
         if "custom_flags" in cfg:
             cmd.extend(cfg["custom_flags"])
 
