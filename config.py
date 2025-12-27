@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     allowed_origins: Union[str, List[str]] = "http://127.0.0.1:8443"  # 文字列またはリストとして定義
     threads_compat_mode: bool = True  # thread_id省略を許可する互換モード（Phase A/Bで使用）
 
+    # AI CLI Defaults
+    codex_default_sandbox: Optional[Literal["read-only", "workspace-write", "danger-full-access"]] = None
+
     # APNs Push Notification Configuration
     apns_key_id: str = ""
     apns_team_id: str = ""

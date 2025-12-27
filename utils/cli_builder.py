@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from config import settings as app_settings
+
 
 def build_claude_command(settings: Optional[Dict] = None) -> List[str]:
     cmd: List[str] = ["claude", "--print", "--output-format", "text"]
@@ -32,6 +34,7 @@ def build_claude_command(settings: Optional[Dict] = None) -> List[str]:
 def build_codex_command(settings: Optional[Dict] = None) -> List[str]:
     cmd: List[str] = ["codex", "exec"]
 
+    cfg = None
     if settings and "codex" in settings:
         cfg = settings["codex"]
         if "model" in cfg:
@@ -49,6 +52,11 @@ def build_codex_command(settings: Optional[Dict] = None) -> List[str]:
             cmd.extend(["-c", f"model_reasoning_effort={effort}"])
         if "custom_flags" in cfg:
             cmd.extend(cfg["custom_flags"])
+
+    if not (cfg and "sandbox" in cfg):
+        default_sandbox = app_settings.codex_default_sandbox
+        if default_sandbox:
+            cmd.extend(["-s", default_sandbox])
 
     return cmd
 
